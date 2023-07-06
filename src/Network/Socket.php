@@ -7,6 +7,8 @@ class Socket
     private int $readBufferSize;
     private int $writeBufferSize;
 
+    private bool $connected = false;
+
     public function __construct(
         private \Socket $socket
     )
@@ -40,17 +42,19 @@ class Socket
             $error = socket_last_error($this->socket);
 
             if ($error !== SOCKET_EALREADY && $error !== SOCKET_EINPROGRESS) {
-                socket_close($this->socket);
+                $this->close();
                 return false;
             }
 
             if ($timeout !== null && microtime(true) - $start > $timeout) {
-                socket_close($this->socket);
+                $this->close();
                 return false;
             }
 
             \Fiber::suspend();
         }
+
+        $this->connected = true;
 
         return true;
     }
@@ -75,10 +79,11 @@ class Socket
 
         do {
             \Fiber::suspend();
+
             $chunk = socket_read($this->socket, $this->readBufferSize);
 
             if ($chunk === false && socket_last_error($this->socket) === SOCKET_EAGAIN) {
-                return $buffer;
+                \Fiber::suspend();
             }
 
             $buffer .= $chunk;
@@ -89,6 +94,7 @@ class Socket
 
     public function close(): void
     {
+        $this->connected = false;
         socket_close($this->socket);
     }
 
@@ -107,5 +113,10 @@ class Socket
     public function __destruct()
     {
         $this->close();
+    }
+
+    public function isConnected(): bool
+    {
+        return $this->connected;
     }
 }
