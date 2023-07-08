@@ -2,7 +2,7 @@
 
 namespace inisire\fibers\Network;
 
-class SocketError
+class SocketError implements \inisire\fibers\Contract\SocketError
 {
     public function __construct(
         private readonly int    $code,

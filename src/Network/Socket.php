@@ -2,7 +2,7 @@
 
 namespace inisire\fibers\Network;
 
-class Socket
+class Socket implements \inisire\fibers\Contract\Socket
 {
     private int $readBufferSize;
     private int $writeBufferSize;
@@ -84,10 +84,11 @@ class Socket
 
             if ($chunk === false && socket_last_error($this->socket) === SOCKET_EAGAIN) {
                 \Fiber::suspend();
+                continue;
             }
 
             $buffer .= $chunk;
-        } while ($chunk !== false && strcmp($chunk, '') !== 0);
+        } while ($buffer === '');
 
         return $buffer;
     }
