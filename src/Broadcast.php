@@ -17,7 +17,7 @@ class Broadcast implements Contract\WritableChannel
 
     public function attach(Contract\ReadableChannel $channel): Contract\ReadableChannel
     {
-        $this->channels[] = $channel;
+        $this->channels[$channel] = true;
 
         return $channel;
     }
