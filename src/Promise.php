@@ -2,6 +2,8 @@
 
 namespace inisire\fibers;
 
+use inisire\fibers\Promise\Timeout;
+
 /**
  * @template T
  */
@@ -26,8 +28,15 @@ class Promise {
      *
      * @throws \Throwable
      */
-    public function await(): mixed
+    public function await(?Timeout $timeout = null): mixed
     {
+        if ($timeout) {
+            Scheduler::async(function () use ($timeout) {
+                Scheduler::sleep($timeout->getSeconds());
+                $this->resolve($timeout->getRejectValue());
+            });
+        }
+
         while ($this->value === null) {
             \Fiber::suspend();
         }
