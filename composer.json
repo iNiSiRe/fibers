@@ -12,6 +12,9 @@
   "autoload": {
     "psr-4": {
       "inisire\\fibers\\": "src/"
-    }
+    },
+    "files": [
+      "src/functions.php"
+    ]
   }
 }

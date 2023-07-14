@@ -43,6 +43,11 @@ class Scheduler {
         return self::$instance;
     }
 
+    public function schedule(\Fiber $fiber): void
+    {
+        $this->fibers[] = $fiber;
+    }
+
     public static function async(callable $function): void
     {
         self::instance()->fibers[] = new \Fiber($function);
