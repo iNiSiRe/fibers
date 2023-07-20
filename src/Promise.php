@@ -31,8 +31,8 @@ class Promise {
     public function await(?Timeout $timeout = null): mixed
     {
         if ($timeout) {
-            Scheduler::async(function () use ($timeout) {
-                Scheduler::sleep($timeout->getSeconds());
+            async(function () use ($timeout) {
+                asleep($timeout->getSeconds());
                 $this->resolve($timeout->getRejectValue());
             });
         }

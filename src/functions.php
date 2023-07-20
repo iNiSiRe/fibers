@@ -8,7 +8,7 @@ function async(callable $function): void
     $scheduler->schedule(new \Fiber($function));
 }
 
-function sleep(float $seconds): void
+function asleep(float $seconds): void
 {
     $start = microtime(true);
 

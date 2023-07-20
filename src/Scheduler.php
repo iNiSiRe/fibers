@@ -48,11 +48,6 @@ class Scheduler {
         $this->fibers[] = $fiber;
     }
 
-    public static function async(callable $function): void
-    {
-        self::instance()->fibers[] = new \Fiber($function);
-    }
-
     public static function sleep(float $seconds): void
     {
         $start = microtime(true);

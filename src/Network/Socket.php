@@ -18,20 +18,6 @@ class Socket implements \inisire\fibers\Contract\Socket
         $this->writeBufferSize = socket_get_option($this->socket, SOL_SOCKET, SO_SNDBUF);
     }
 
-    public static function tcp(): static
-    {
-        $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-
-        return new static($socket);
-    }
-
-    public static function udp(): static
-    {
-        $socket = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
-
-        return new static($socket);
-    }
-
     public function connect(string $host, int $port, ?int $timeout = null): bool
     {
         \Fiber::suspend();
