@@ -1,19 +1,26 @@
 <?php
 
-namespace inisire\fibers\Network;
+namespace inisire\fibers\Network\TCP;
 
-class Socket implements \inisire\fibers\Contract\Socket
+use Evenement\EventEmitterTrait;
+use inisire\fibers\Network\SocketError;
+
+class Socket
 {
-    private int $readBufferSize;
-    private int $writeBufferSize;
+    use EventEmitterTrait;
+
+    private \Socket $socket;
 
     private bool $connected = false;
 
-    public function __construct(
-        private \Socket $socket
-    )
+    private int $readBufferSize;
+    private int $writeBufferSize;
+
+    public function __construct()
     {
+        $this->socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
         socket_set_nonblock($this->socket);
+
         $this->readBufferSize = socket_get_option($this->socket, SOL_SOCKET, SO_RCVBUF);
         $this->writeBufferSize = socket_get_option($this->socket, SOL_SOCKET, SO_SNDBUF);
     }
@@ -47,20 +54,47 @@ class Socket implements \inisire\fibers\Contract\Socket
 
     public function write(string $data): false|int
     {
+        if (!$this->isConnected()) {
+            throw new \RuntimeException('Connection is closed');
+        }
+
         \Fiber::suspend();
 
-        return socket_write($this->socket, $data, strlen($data));
-    }
+        $sent = 0;
+        $size = strlen($data);
 
-    public function sendTo(string $address, ?int $port, string $data): false|int
-    {
-        \Fiber::suspend();
+        while ($sent < $size) {
+            $chunkLength = strlen($data);
+            $chunkSent = socket_write($this->socket, $data, $chunkLength);
 
-        return socket_sendto($this->socket, $data , strlen($data) , 0 , $address , $port);
+            if ($chunkSent === false || $chunkSent === 0) {
+                $error = $this->lastError();
+                if ($error->getCode() === SOCKET_EAGAIN) {
+                    \Fiber::suspend();
+                    continue;
+                } else {
+                    $this->emit('error', [$this->lastError()]);
+                    $this->close();
+                    break;
+                }
+            }
+
+            if ($chunkSent < $chunkLength) {
+                $data = substr($data, $chunkSent);
+            }
+
+            $sent += $chunkSent;
+        }
+
+        return $sent;
     }
 
     public function read(): string
     {
+        if (!$this->isConnected()) {
+            throw new \RuntimeException('Connection is closed');
+        }
+
         $buffer = '';
 
         do {
@@ -81,6 +115,10 @@ class Socket implements \inisire\fibers\Contract\Socket
 
     public function close(): void
     {
+        if (!$this->isConnected()) {
+            throw new \RuntimeException('Connection is closed');
+        }
+
         $this->connected = false;
         socket_close($this->socket);
     }
@@ -95,6 +133,11 @@ class Socket implements \inisire\fibers\Contract\Socket
     public function clearError(): void
     {
         socket_clear_error($this->socket);
+    }
+
+    public function onError(callable $handler)
+    {
+        $this->on('error', $handler);
     }
 
     public function __destruct()

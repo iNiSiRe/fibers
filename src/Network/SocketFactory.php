@@ -2,19 +2,18 @@
 
 namespace inisire\fibers\Network;
 
-class SocketFactory implements \inisire\fibers\Contract\SocketFactory
+use inisire\fibers\Network\TCP\Socket;
+use inisire\fibers\Network\UDP\DatagramSocket;
+
+class SocketFactory
 {
     public function createTCP(): Socket
     {
-        $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-
-        return new Socket($socket);
+        return new Socket();
     }
 
-    public function createUDP(): Socket
+    public function createUDP(): DatagramSocket
     {
-        $socket = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
-
-        return new Socket($socket);
+        return new DatagramSocket();
     }
 }
