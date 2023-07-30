@@ -3,79 +3,63 @@
 namespace inisire\fibers\Network\TCP;
 
 use Evenement\EventEmitterTrait;
-use inisire\fibers\Network\SocketError;
+use inisire\fibers\Network\Exception\ConnectionException;
+use function inisire\fibers\async;
 
 class Socket
 {
     use EventEmitterTrait;
 
-    private \Socket $socket;
-
-    private bool $connected = false;
+    private bool $open;
 
     private int $readBufferSize;
     private int $writeBufferSize;
 
-    public function __construct()
-    {
-        $this->socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-        socket_set_nonblock($this->socket);
+    private bool $reader = false;
 
-        $this->readBufferSize = socket_get_option($this->socket, SOL_SOCKET, SO_RCVBUF);
-        $this->writeBufferSize = socket_get_option($this->socket, SOL_SOCKET, SO_SNDBUF);
+    public function __construct(
+        private readonly \Socket $handle,
+    )
+    {
+        echo 'Socket #' . spl_object_hash($this) . ' created' . PHP_EOL;
+
+        $this->open = true;
+        $this->readBufferSize = socket_get_option($this->handle, SOL_SOCKET, SO_RCVBUF);
+        $this->writeBufferSize = socket_get_option($this->handle, SOL_SOCKET, SO_SNDBUF);
     }
 
-    public function connect(string $host, int $port, ?int $timeout = null): bool
-    {
-        \Fiber::suspend();
-
-        $start = microtime(true);
-
-        while (!@socket_connect($this->socket, $host, $port)) {
-            $error = socket_last_error($this->socket);
-
-            if ($error !== SOCKET_EALREADY && $error !== SOCKET_EINPROGRESS) {
-                $this->close();
-                return false;
-            }
-
-            if ($timeout !== null && microtime(true) - $start > $timeout) {
-                $this->close();
-                return false;
-            }
-
-            \Fiber::suspend();
-        }
-
-        $this->connected = true;
-
-        return true;
-    }
-
+    /**
+     * @throws ConnectionException
+     */
     public function write(string $data): false|int
     {
-        if (!$this->isConnected()) {
-            throw new \RuntimeException('Connection is closed');
-        }
-
         \Fiber::suspend();
 
         $sent = 0;
         $size = strlen($data);
 
-        while ($sent < $size) {
+        while ($this->isOpen() && $sent < $size) {
             $chunkLength = strlen($data);
-            $chunkSent = socket_write($this->socket, $data, $chunkLength);
+
+            try {
+                $chunkSent = socket_write($this->handle, $data, $chunkLength);
+//            $chunkSent = socket_send($this->socket, $data, $chunkLength, 0);
+                $error = socket_last_error($this->handle);
+                socket_clear_error($this->handle);
+            } catch (\Error $error) {
+                $this->close();
+                throw new ConnectionException($error->getCode(), $error->getMessage(), $error);
+            }
+
+//            echo 'WRITE: ' .  $chunkSent . ' / ' . $error . ' / ' . socket_strerror($error) . PHP_EOL;
 
             if ($chunkSent === false || $chunkSent === 0) {
-                $error = $this->lastError();
-                if ($error->getCode() === SOCKET_EAGAIN) {
+                if ($error === SOCKET_EAGAIN) {
                     \Fiber::suspend();
                     continue;
                 } else {
-                    $this->emit('error', [$this->lastError()]);
                     $this->close();
-                    break;
+                    throw new ConnectionException($error, socket_strerror($error));
                 }
             }
 
@@ -89,64 +73,81 @@ class Socket
         return $sent;
     }
 
-    public function read(): string
+    /**
+     * @throws ConnectionException
+     */
+    private function startReader(): void
     {
-        if (!$this->isConnected()) {
-            throw new \RuntimeException('Connection is closed');
-        }
+        $this->reader = true;
 
-        $buffer = '';
+        \Fiber::suspend();
 
-        do {
-            \Fiber::suspend();
-
-            $chunk = socket_read($this->socket, $this->readBufferSize);
-
-            if ($chunk === false && socket_last_error($this->socket) === SOCKET_EAGAIN) {
-                \Fiber::suspend();
-                continue;
+        while ($this->isOpen()) {
+            try {
+                $received = socket_recv($this->handle, $chunk, $this->readBufferSize, 0);
+                $error = socket_last_error($this->handle);
+                socket_clear_error($this->handle);
+            } catch (\Error $error) {
+                $this->close();
+                throw new ConnectionException($error->getCode(), $error->getMessage(), $error);
             }
 
-            $buffer .= $chunk;
-        } while ($buffer === '');
+//            echo 'READ: ' . (($received === false) ? 'false' : $received) . ' / ' . $error . ' / ' . socket_strerror($error) . PHP_EOL;
 
-        return $buffer;
+            if ($received === false || $chunk === null || $chunk === '') {
+                if ($error === 0 || $error === SOCKET_EAGAIN) {
+                    \Fiber::suspend();
+                    continue;
+                } else {
+                    $this->close();
+                    throw new ConnectionException($error, socket_strerror($error));
+                }
+            }
+
+            $this->emit('data', [$chunk]);
+        }
+    }
+
+    public function onData(callable $handler): void
+    {
+        $this->on('data', $handler);
+
+        if (!$this->reader) {
+            async(function () {
+                try {
+                    $this->startReader();
+                } catch (ConnectionException $exception) {
+                }
+            });
+        }
+    }
+
+    public function onClose(callable $handler): void
+    {
+        $this->on('close', $handler);
     }
 
     public function close(): void
     {
-        if (!$this->isConnected()) {
-            throw new \RuntimeException('Connection is closed');
+        if (!$this->isOpen()) {
+            return;
         }
 
-        $this->connected = false;
-        socket_close($this->socket);
-    }
+        $this->open = false;
+        socket_shutdown($this->handle);
+        socket_close($this->handle);
 
-    public function lastError(): SocketError
-    {
-        $code = socket_last_error($this->socket);
-
-        return new SocketError($code, socket_strerror($code));
-    }
-
-    public function clearError(): void
-    {
-        socket_clear_error($this->socket);
-    }
-
-    public function onError(callable $handler)
-    {
-        $this->on('error', $handler);
+        $this->emit('close');
+        $this->removeAllListeners();
     }
 
     public function __destruct()
     {
-        $this->close();
+        echo 'Socket #' . spl_object_hash($this) . ' destroyed' . PHP_EOL;
     }
 
-    public function isConnected(): bool
+    public function isOpen(): bool
     {
-        return $this->connected;
+        return $this->open;
     }
 }
